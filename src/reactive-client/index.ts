@@ -1,4 +1,3 @@
-// reactive-client.ts (unchanged, as it's the core RxJS sync layer)
 import type { Observable } from "rxjs";
 import { BehaviorSubject, from } from "rxjs";
 
@@ -6,91 +5,98 @@ import type {
   ClientMessage,
   hydraStatus,
   ServerOutput,
-} from "../../../mesh-hydra/src";
+} from "../types";
 import type { HydraProviderOptions, HydraReactive } from "../types";
-import { HydraProvider } from "../../../mesh-hydra/src";
+import { HydraProvider } from "@meshsdk/hydra";
 
 export class HydraReactiveClient {
   private readonly provider: HydraProvider;
-  private readonly status$ = new BehaviorSubject<hydraStatus | null>(null);
-  private readonly message$ = new BehaviorSubject<
+  private readonly statusSubject = new BehaviorSubject<hydraStatus | null>(
+    null,
+  );
+  private readonly messageSubject = new BehaviorSubject<
     ServerOutput | ClientMessage | null
   >(null);
-  private readonly listeners = new Set<
-    (msg: ServerOutput | ClientMessage) => void
+  private readonly messageListeners = new Set<
+    (message: ServerOutput | ClientMessage) => void
   >();
-  private readonly reactiveApi: HydraReactive;
+  private readonly reactive: HydraReactive;
 
   constructor(options: HydraProviderOptions) {
     this.provider = new HydraProvider(options);
-    this.provider.onStatusChange((s) => this.status$.next(s));
-    this.provider.onMessage((msg) => {
-      this.message$.next(msg);
-      this.listeners.forEach((fn) => fn(msg));
-    });
-    this.reactiveApi = this.buildReactiveProxy();
+    this.setupEventHandlers();
+    this.reactive = this.createReactiveProxy();
   }
 
   get hydra(): HydraReactive {
-    return this.reactiveApi;
+    return this.reactive;
   }
 
-  get hydraProvider(): HydraProvider {
-    return this.provider;
+  get status$(): Observable<hydraStatus | null> {
+    return this.statusSubject.asObservable();
   }
 
-  get observable_status(): Observable<hydraStatus | null> {
-    return this.status$.asObservable();
-  }
-
-  get observable_message(): Observable<ServerOutput | ClientMessage | null> {
-    return this.message$.asObservable();
+  get messages$(): Observable<ServerOutput | ClientMessage | null> {
+    return this.messageSubject.asObservable();
   }
 
   get latestStatus(): hydraStatus | null {
-    return this.status$.value;
+    return this.statusSubject.getValue();
   }
 
   get latestMessage(): ServerOutput | ClientMessage | null {
-    return this.message$.value;
+    return this.messageSubject.getValue();
   }
 
   teardown(): void {
-    this.listeners.clear();
-    this.provider.onMessage(() => {});
+    this.messageListeners.clear();
+    this.statusSubject.complete();
+    this.messageSubject.complete();
+    this.provider.onMessage(() => undefined);
   }
 
-  private buildReactiveProxy(): HydraReactive {
-    const self = this;
+  private setupEventHandlers(): void {
+    this.provider.onStatusChange((status) => {
+      this.statusSubject.next(status);
+    });
+
+    this.provider.onMessage((message) => {
+      this.messageSubject.next(message);
+      this.messageListeners.forEach((listener) => listener(message));
+    });
+  }
+
+  private createReactiveProxy(): HydraReactive {
+    const client = this;
 
     return new Proxy(this.provider, {
       get(target, prop, receiver) {
         if (prop === "onMessage") {
-          return (listener: (msg: ServerOutput | ClientMessage) => void) => {
-            self.listeners.add(listener);
-            return () => self.listeners.delete(listener);
+          return (
+            listener: (message: ServerOutput | ClientMessage) => void,
+          ) => {
+            client.messageListeners.add(listener);
+            return () => client.messageListeners.delete(listener);
           };
         }
 
         if (prop === "onStatusChange") {
-          return (listener: (s: hydraStatus) => void) => {
-            const sub = self.status$.subscribe((s) => {
-              if (s !== null) listener(s);
+          return (listener: (status: hydraStatus) => void) => {
+            const subscription = client.statusSubject.subscribe((status) => {
+              if (status !== null) {
+                listener(status);
+              }
             });
-            return () => sub.unsubscribe();
+            return () => subscription.unsubscribe();
           };
         }
 
         const value = Reflect.get(target, prop, receiver);
+
         if (typeof value === "function") {
           return (...args: any[]) => {
             const result = value.apply(target, args);
-
-            if (result && typeof result.then === "function") {
-              return from(result);
-            }
-
-            return result;
+            return result?.then ? from(result) : result;
           };
         }
 
