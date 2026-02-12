@@ -1,5 +1,4 @@
 # Publish @meshsdk/hydra-react to npm when a PR to main is merged and package version was updated.
-# Single-package replica of the Mesh monorepo publish workflow.
 
 name: Publish @meshsdk/hydra-react
 
