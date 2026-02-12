@@ -1,3 +1,6 @@
+# Publish @meshsdk/hydra-react to npm when a PR to main is merged and package version was updated.
+# Single-package replica of the Mesh monorepo publish workflow.
+
 name: Publish @meshsdk/hydra-react
 
 on:
@@ -14,30 +17,19 @@ jobs:
       matrix:
         node-version: [20]
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
+      - uses: actions/checkout@v4
       - name: Use Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v4
-        with:
-          node-version: ${{ matrix.node-version }}
-
       - name: Install dependencies
         run: npm install
-
       - name: Lint
         run: npm run lint
-
-      - name: Type check
-        run: npm run type-check
-
-      - name: Build package
+      - name: Build
         run: npm run build:mesh
 
   check-version:
     runs-on: ubuntu-latest
     if: github.event.pull_request.merged == true
-    needs: build
     outputs:
       version-updated: ${{ steps.compare-versions.outputs.version-updated }}
     steps:
@@ -72,27 +64,17 @@ jobs:
             echo "version-updated=false" >> "$GITHUB_OUTPUT"
           fi
 
-  publish-hydra-react:
+  publish-meshsdk-hydra-react:
     needs: [build, check-version]
     if: needs.check-version.outputs.version-updated == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Use Node.js 20
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 20
           registry-url: https://registry.npmjs.org/
-
-      - name: Install dependencies and build
-        run: |
-          npm install
-          npm run build:mesh
-
-      - name: Publish @meshsdk/hydra-react to npm
-        run: npm publish --access public
+      - run: npm install && npm run build
+      - run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.npm_token }}
-
