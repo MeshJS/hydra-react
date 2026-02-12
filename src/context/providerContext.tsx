@@ -10,4 +10,3 @@ export interface HydraReactProviderProps {
 }
 
 export const HydraReactContext = createContext<HydraReactContextValue | undefined>(undefined);
-
